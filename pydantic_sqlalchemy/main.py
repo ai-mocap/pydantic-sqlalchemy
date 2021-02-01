@@ -2,7 +2,7 @@ from typing import Container, Optional, Type
 
 from pydantic import BaseConfig, BaseModel, create_model
 from sqlalchemy.inspection import inspect
-from sqlalchemy.orm.properties import ColumnProperty
+from sqlalchemy.orm.properties import ColumnProperty, RelationshipProperty
 
 
 class OrmConfig(BaseConfig):
@@ -15,11 +15,11 @@ def sqlalchemy_to_pydantic(
     mapper = inspect(db_model)
     fields = {}
     for attr in mapper.attrs:
+        name = attr.key
+        if name in exclude:
+            continue
         if isinstance(attr, ColumnProperty):
             if attr.columns:
-                name = attr.key
-                if name in exclude:
-                    continue
                 column = attr.columns[0]
                 python_type: Optional[type] = None
                 if hasattr(column.type, "impl"):
@@ -32,6 +32,8 @@ def sqlalchemy_to_pydantic(
                 if column.default is None and not column.nullable:
                     default = ...
                 fields[name] = (python_type, default)
+        elif isinstance(attr, RelationshipProperty) and attr.lazy == 'joined':
+            fields[attr.key] = (sqlalchemy_to_pydantic(attr.entity.class_, config=config, exclude=exclude), None)
     pydantic_model = create_model(
         db_model.__name__, __config__=config, **fields  # type: ignore
     )
